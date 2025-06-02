@@ -8,7 +8,7 @@ let db: any = null;
 async function initDB() {
   if (!db) {
     const SQL = await initSqlJs();
-    const dbPath = path.join(process.cwd(), 'voice_messages.db');
+    const dbPath = path.join('/tmp', 'voice_messages.db');
     
     let buffer;
     try {
