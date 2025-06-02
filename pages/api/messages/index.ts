@@ -7,10 +7,8 @@ let db: any = null;
 
 async function initDB() {
   if (!db) {
-    const wasmBinary = fs.readFileSync(path.join(process.cwd(), 'public', 'sql-wasm.wasm'));
-    
     const SQL = await initSqlJs({
-      wasmBinary
+      locateFile: (filename) => `/sql-wasm.wasm`
     });
     
     const dbPath = path.join(process.cwd(), 'public', 'voice_messages.db');
@@ -38,7 +36,7 @@ async function initDB() {
     
     // Save the database to disk
     const data = db.export();
-    fs.writeFileSync(dbPath, Buffer.from(data));
+    fs.writeFileSync(path.join(process.cwd(), 'public', 'voice_messages.db'), Buffer.from(data));
   }
   return db;
 }
