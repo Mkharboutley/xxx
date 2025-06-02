@@ -23,20 +23,13 @@ export default function GlassTicket({ ticketId, role }: Props) {
   } = usePeerConnection(role);
 
   useEffect(() => {
-    initializeVoiceChat();
-  }, [ticketId]);
-
-  const initializeVoiceChat = () => {
+    const roomId = `ticket_${ticketId}`;
     if (role === 'admin') {
-      const roomData = createRoom();
-      localStorage.setItem(`voiceRoom_${ticketId}`, JSON.stringify(roomData));
+      createRoom(roomId);
     } else {
-      const roomData = JSON.parse(localStorage.getItem(`voiceRoom_${ticketId}`) || '{}');
-      if (roomData.roomId) {
-        joinRoom(roomData);
-      }
+      joinRoom(roomId);
     }
-  };
+  }, [ticketId, role]);
 
   const handleSendVoiceMessage = (audioBlob: Blob, duration: number) => {
     if (!isConnected) {
