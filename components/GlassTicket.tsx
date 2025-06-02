@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { v4 as uuidv4 } from 'uuid';
+import io from 'socket.io-client';
 
 interface VoiceMessage {
   id: string;
   ticketId: string;
   timestamp: string;
-  audioData: string;
+  audioBlob: Blob;
   sender: string;
 }
 
@@ -14,61 +15,41 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   const [isRecording, setIsRecording] = useState(false);
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
   const [recordingTime, setRecordingTime] = useState(0);
-  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   
-  const timerRef = useRef<number | null>(null);
+  const socketRef = useRef<any>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const syncIntervalRef = useRef<number | null>(null);
+  const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    loadMessages();
-    setupMessageSync();
-    return () => cleanup();
-  }, [ticketId]);
+    // Initialize socket connection
+    socketRef.current = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001', {
+      query: { ticketId, role }
+    });
+
+    // Listen for new voice messages
+    socketRef.current.on('voiceMessage', (message: VoiceMessage) => {
+      setMessages(prev => [...prev, message]);
+      if (role === 'admin') {
+        toast.info('New voice message received!');
+      }
+    });
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+      cleanup();
+    };
+  }, [ticketId, role]);
 
   const cleanup = () => {
     if (audioStream) {
       audioStream.getTracks().forEach(track => track.stop());
     }
     if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
-    if (syncIntervalRef.current) {
-      clearInterval(syncIntervalRef.current);
-    }
-  };
-
-  const setupMessageSync = () => {
-    if (role === 'admin') {
-      syncIntervalRef.current = setInterval(() => {
-        const sync = localStorage.getItem('adminTicketSync');
-        if (sync) {
-          try {
-            const { ticketId: syncedTicketId } = JSON.parse(sync);
-            if (syncedTicketId === ticketId) {
-              loadMessages();
-              localStorage.removeItem('adminTicketSync');
-              toast.info('New voice message received!');
-            }
-          } catch (err) {
-            console.error('Sync error:', err);
-          }
-        }
-      }, 1000);
-    }
-  };
-
-  const loadMessages = () => {
-    try {
-      const recordings = JSON.parse(localStorage.getItem('voiceRecordings') || '[]');
-      const ticketMessages = recordings
-        .filter((r: VoiceMessage) => r.ticketId === ticketId)
-        .slice(-5);
-      setMessages(ticketMessages);
-    } catch (err) {
-      console.error('Error loading messages:', err);
-      toast.error('Failed to load voice messages');
+      window.clearInterval(timerRef.current);
     }
   };
 
@@ -84,10 +65,7 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
       
       setAudioStream(stream);
 
-      const recorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
-      });
-      
+      const recorder = new MediaRecorder(stream);
       setMediaRecorder(recorder);
       chunksRef.current = [];
       
@@ -127,7 +105,7 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     if (mediaRecorder?.state === 'recording') {
       mediaRecorder.stop();
       audioStream?.getTracks().forEach(track => track.stop());
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) window.clearInterval(timerRef.current);
       setIsRecording(false);
       setRecordingTime(0);
       toast.info('Recording stopped');
@@ -135,59 +113,30 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   };
 
   const handleRecordingStop = async () => {
-    if (chunksRef.current.length === 0) {
-      toast.error('No audio data recorded');
-      return;
-    }
-
-    const blob = new Blob(chunksRef.current, { 
-      type: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
-    });
-
-    if (blob.size === 0) {
+    const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    
+    if (audioBlob.size === 0) {
       toast.error('Recording is empty');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64Audio = reader.result as string;
-      if (!base64Audio) {
-        toast.error('Failed to process audio');
-        return;
-      }
-
-      const message: VoiceMessage = {
-        id: uuidv4(),
-        ticketId,
-        timestamp: new Date().toISOString(),
-        audioData: base64Audio,
-        sender: role
-      };
-
-      const updatedMessages = [...messages, message].slice(-5);
-      setMessages(updatedMessages);
-      
-      const allRecordings = JSON.parse(localStorage.getItem('voiceRecordings') || '[]');
-      const otherRecordings = allRecordings.filter((r: VoiceMessage) => r.ticketId !== ticketId);
-      localStorage.setItem('voiceRecordings', JSON.stringify([...otherRecordings, ...updatedMessages]));
-
-      if (role === 'client') {
-        localStorage.setItem('adminTicketSync', JSON.stringify({
-          ticketId,
-          timestamp: message.timestamp,
-          hasNewMessage: true
-        }));
-        toast.success('Voice message sent to admin');
-      }
+    const message: VoiceMessage = {
+      id: uuidv4(),
+      ticketId,
+      timestamp: new Date().toISOString(),
+      audioBlob,
+      sender: role
     };
 
-    reader.onerror = () => {
-      console.error('Error reading audio file:', reader.error);
-      toast.error('Failed to process audio file');
-    };
-
-    reader.readAsDataURL(blob);
+    // Send message through socket
+    socketRef.current.emit('sendVoiceMessage', message);
+    
+    // Add to local messages
+    setMessages(prev => [...prev, message]);
+    
+    if (role === 'client') {
+      toast.success('Voice message sent to admin');
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -225,7 +174,11 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
                 {new Date(message.timestamp).toLocaleString()}
               </span>
             </div>
-            <audio src={message.audioData} controls className="w-full mt-2" />
+            <audio 
+              src={URL.createObjectURL(message.audioBlob)} 
+              controls 
+              className="w-full mt-2" 
+            />
           </div>
         ))}
       </div>
