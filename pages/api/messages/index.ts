@@ -1,30 +1,35 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import Database from 'better-sqlite3';
+import { tblite } from '@vlcn.io/crsqlite-wasm';
 import path from 'path';
 
-const db = new Database(path.join(process.cwd(), 'voice_messages.db'));
+let db: any = null;
 
-// Create messages table if it doesn't exist
-db.exec(`
-  CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,
-    ticketId TEXT NOT NULL,
-    timestamp TEXT NOT NULL,
-    audioData TEXT NOT NULL,
-    sender TEXT NOT NULL
-  )
-`);
+async function initDB() {
+  if (!db) {
+    db = await tblite.open(path.join(process.cwd(), 'voice_messages.db'));
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        ticketId TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        audioData TEXT NOT NULL,
+        sender TEXT NOT NULL
+      )
+    `);
+  }
+  return db;
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'POST') {
     try {
       const { id, ticketId, timestamp, audioData, sender } = req.body;
+      const db = await initDB();
       
-      const stmt = db.prepare(
-        'INSERT INTO messages (id, ticketId, timestamp, audioData, sender) VALUES (?, ?, ?, ?, ?)'
+      await db.exec(
+        'INSERT INTO messages (id, ticketId, timestamp, audioData, sender) VALUES (?, ?, ?, ?, ?)',
+        [id, ticketId, timestamp, audioData, sender]
       );
-      
-      stmt.run(id, ticketId, timestamp, audioData, sender);
       
       res.status(200).json({ success: true });
     } catch (error) {
