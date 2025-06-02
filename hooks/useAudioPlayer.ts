@@ -11,7 +11,6 @@ const useAudioPlayer = (audioUrl: string) => {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationRef = useRef<number | null>(null);
   
-  // Set up audio player and analyzer
   useEffect(() => {
     if (!audioUrl) return;
     
@@ -19,11 +18,11 @@ const useAudioPlayer = (audioUrl: string) => {
     audioRef.current = audio;
     
     audio.addEventListener('loadedmetadata', () => {
-      setDuration(audio.duration * 1000); // convert to ms
+      setDuration(audio.duration * 1000);
     });
     
     audio.addEventListener('timeupdate', () => {
-      setCurrentTime(audio.currentTime * 1000); // convert to ms
+      setCurrentTime(audio.currentTime * 1000);
     });
     
     audio.addEventListener('ended', () => {
@@ -32,7 +31,6 @@ const useAudioPlayer = (audioUrl: string) => {
       stopVisualization();
     });
     
-    // Set up audio analyzer
     const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
     const audioContext = new AudioContext();
     audioContextRef.current = audioContext;
@@ -96,7 +94,6 @@ const useAudioPlayer = (audioUrl: string) => {
       audioRef.current.play();
       startVisualization();
       
-      // If audio context is suspended (e.g., by browser policy), resume it
       if (audioContextRef.current?.state === 'suspended') {
         audioContextRef.current.resume();
       }
