@@ -17,9 +17,9 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<number | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const syncIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     loadMessages();
@@ -112,7 +112,7 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
 
   const startTimer = () => {
     setRecordingTime(0);
-    timerRef.current = setInterval(() => {
+    timerRef.current = window.setInterval(() => {
       setRecordingTime(prev => {
         if (prev >= 60) {
           stopRecording();
