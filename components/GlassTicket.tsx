@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { v4 as uuidv4 } from 'uuid';
+import { getSocket } from '@/pages/_app';
 
 interface VoiceMessage {
   id: string;
@@ -19,13 +20,20 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
-  const pollIntervalRef = useRef<number | null>(null);
+  const socket = getSocket();
 
   useEffect(() => {
+    if (socket) {
+      socket.emit('join', { ticketId, role });
+      
+      socket.on('voiceMessage', (message: VoiceMessage) => {
+        setMessages(prev => [...prev, message]);
+      });
+    }
+
     loadMessages();
-    startPolling();
     return () => cleanup();
-  }, [ticketId]);
+  }, [ticketId, socket]);
 
   const cleanup = () => {
     if (audioStream) {
@@ -34,26 +42,21 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
     }
-    if (pollIntervalRef.current) {
-      window.clearInterval(pollIntervalRef.current);
+    if (socket) {
+      socket.off('voiceMessage');
+      socket.emit('leave', { ticketId });
     }
-  };
-
-  const startPolling = () => {
-    // Poll for new messages every 2 seconds
-    pollIntervalRef.current = window.setInterval(() => {
-      loadMessages();
-    }, 2000);
   };
 
   const loadMessages = async () => {
     try {
       const response = await fetch(`/api/messages/${ticketId}`);
       if (!response.ok) throw new Error('Failed to load messages');
-      const messages = await response.json();
-      setMessages(messages);
+      const data = await response.json();
+      setMessages(data);
     } catch (err) {
       console.error('Error loading messages:', err);
+      toast.error('Failed to load messages');
     }
   };
 
@@ -133,7 +136,7 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     reader.onloadend = async () => {
       const base64Audio = reader.result as string;
       
-      const message = {
+      const message: VoiceMessage = {
         id: uuidv4(),
         ticketId,
         timestamp: new Date().toISOString(),
@@ -151,6 +154,11 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
         });
 
         if (!response.ok) throw new Error('Failed to save message');
+
+        // Emit the message through socket
+        if (socket) {
+          socket.emit('sendVoiceMessage', message);
+        }
 
         setMessages(prev => [...prev, message]);
         toast.success('Voice message sent successfully');
