@@ -1,13 +1,27 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { tblite } from '@vlcn.io/crsqlite-wasm';
+import initSqlJs from 'sql.js';
+import fs from 'fs';
 import path from 'path';
 
 let db: any = null;
 
 async function initDB() {
   if (!db) {
-    db = await tblite.open(path.join(process.cwd(), 'voice_messages.db'));
-    await db.exec(`
+    const SQL = await initSqlJs();
+    const dbPath = path.join(process.cwd(), 'voice_messages.db');
+    
+    let buffer;
+    try {
+      buffer = fs.readFileSync(dbPath);
+    } catch {
+      // If file doesn't exist, create new DB
+      buffer = Buffer.from([]);
+    }
+    
+    db = new SQL.Database(buffer);
+    
+    // Create table if it doesn't exist
+    db.run(`
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
         ticketId TEXT NOT NULL,
@@ -16,6 +30,10 @@ async function initDB() {
         sender TEXT NOT NULL
       )
     `);
+    
+    // Save the database to disk
+    const data = db.export();
+    fs.writeFileSync(dbPath, Buffer.from(data));
   }
   return db;
 }
@@ -26,10 +44,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const { id, ticketId, timestamp, audioData, sender } = req.body;
       const db = await initDB();
       
-      await db.exec(
+      db.run(
         'INSERT INTO messages (id, ticketId, timestamp, audioData, sender) VALUES (?, ?, ?, ?, ?)',
         [id, ticketId, timestamp, audioData, sender]
       );
+      
+      // Save changes to disk
+      const data = db.export();
+      fs.writeFileSync(path.join(process.cwd(), 'voice_messages.db'), Buffer.from(data));
       
       res.status(200).json({ success: true });
     } catch (error) {
