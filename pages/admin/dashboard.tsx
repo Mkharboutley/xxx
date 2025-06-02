@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react';
 import {
   getFirestore,
@@ -27,6 +26,7 @@ import GlassTicket from '@/components/GlassTicket';
 import styles from '@/styles/dashboard.module.css';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import usePeerConnection from '@/hooks/usePeerConnection';
 
 interface Ticket {
   id: string;
@@ -78,6 +78,11 @@ export default function AdminDashboard() {
   const [toDate, setToDate] = useState('');
   const [selectedWorker, setSelectedWorker] = useState('all');
   const [selectedTicket, setSelectedTicket] = useState<string | null>(null);
+
+  const {
+    isConnected,
+    error: connectionError
+  } = usePeerConnection('admin');
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -213,7 +218,12 @@ export default function AdminDashboard() {
         <TicketStats stats={stats} />
 
         {selectedTicket && (
-          <GlassTicket ticketId={selectedTicket} role="admin" />
+          <div className={styles.voiceChatSection}>
+            {connectionError && (
+              <div className={styles.error}>{connectionError}</div>
+            )}
+            <GlassTicket ticketId={selectedTicket} role="admin" />
+          </div>
         )}
 
         <div className={styles.filterBar}>
