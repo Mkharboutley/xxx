@@ -1,7 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { v4 as uuidv4 } from 'uuid';
-import io from 'socket.io-client';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 interface VoiceMessage {
   id: string;
@@ -17,83 +22,54 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   const [recordingTime, setRecordingTime] = useState(0);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
   
-  const socketRef = useRef<any>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const initializeSocket = async () => {
-      try {
-        // Initialize socket server
-        await fetch('/api/socket');
+    // Subscribe to realtime changes
+    const channel = supabase
+      .channel(`ticket-${ticketId}`)
+      .on('broadcast', { event: 'voice_message' }, ({ payload }) => {
+        console.log('Received voice message:', payload);
+        setMessages(prev => {
+          if (prev.some(m => m.id === payload.id)) return prev;
+          return [...prev, payload];
+        });
         
-        // Create socket connection
-        socketRef.current = io({
-          path: '/api/socket',
-          query: { ticketId, role },
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000,
-          timeout: 10000
-        });
+        if (role === 'admin' && payload.sender === 'client') {
+          toast.info('New voice message from client!');
+        }
+      })
+      .subscribe();
 
-        // Socket event handlers
-        socketRef.current.on('connect', () => {
-          console.log('Socket connected successfully');
-          setIsConnected(true);
-          toast.success('Connected to chat server');
-        });
-
-        socketRef.current.on('voiceMessage', (message: VoiceMessage) => {
-          console.log('Received voice message:', message.id);
-          setMessages(prev => {
-            // Avoid duplicate messages
-            if (prev.some(m => m.id === message.id)) {
-              return prev;
-            }
-            return [...prev, message];
-          });
-          
-          if (role === 'admin' && message.sender === 'client') {
-            toast.info('New voice message from client!');
-          }
-        });
-
-        socketRef.current.on('connect_error', (error: Error) => {
-          console.error('Socket connection error:', error);
-          setIsConnected(false);
-          toast.error('Connection error. Trying to reconnect...');
-        });
-
-        socketRef.current.on('disconnect', () => {
-          console.log('Socket disconnected');
-          setIsConnected(false);
-          toast.warn('Disconnected from chat server');
-        });
-
-        socketRef.current.on('reconnect', (attemptNumber: number) => {
-          console.log('Reconnected after', attemptNumber, 'attempts');
-          setIsConnected(true);
-          toast.success('Reconnected to chat server');
-        });
-      } catch (error) {
-        console.error('Failed to initialize socket:', error);
-        toast.error('Failed to connect to chat server');
-      }
-    };
-
-    initializeSocket();
+    // Load existing messages
+    loadMessages();
 
     return () => {
       cleanup();
+      channel.unsubscribe();
     };
   }, [ticketId, role]);
 
-  const cleanup = () => {
-    if (socketRef.current) {
-      socketRef.current.disconnect();
+  const loadMessages = async () => {
+    try {
+      const { data: messages } = await supabase
+        .from('voice_messages')
+        .select('*')
+        .eq('ticketId', ticketId)
+        .order('timestamp', { ascending: true });
+
+      if (messages) {
+        setMessages(messages);
+      }
+    } catch (error) {
+      console.error('Error loading messages:', error);
+      toast.error('Failed to load messages');
     }
+  };
+
+  const cleanup = () => {
     if (audioStream) {
       audioStream.getTracks().forEach(track => track.stop());
     }
@@ -103,11 +79,6 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   };
 
   const startRecording = async () => {
-    if (!isConnected) {
-      toast.error('Not connected to chat server');
-      return;
-    }
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
@@ -170,11 +141,6 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   };
 
   const handleRecordingStop = async () => {
-    if (!isConnected) {
-      toast.error('Not connected to chat server. Message will not be sent.');
-      return;
-    }
-
     const audioBlob = new Blob(chunksRef.current, { 
       type: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
     });
@@ -185,7 +151,7 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     }
 
     const reader = new FileReader();
-    reader.onloadend = () => {
+    reader.onloadend = async () => {
       const base64Audio = reader.result as string;
       
       const message: VoiceMessage = {
@@ -196,15 +162,32 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
         sender: role
       };
 
-      // Send message through socket
-      console.log('Sending voice message:', message.id);
-      socketRef.current.emit('sendVoiceMessage', message);
-      
-      // Add to local messages
-      setMessages(prev => [...prev, message]);
-      
-      if (role === 'client') {
-        toast.success('Voice message sent to admin');
+      try {
+        // Save to Supabase
+        const { error } = await supabase
+          .from('voice_messages')
+          .insert(message);
+
+        if (error) throw error;
+
+        // Broadcast to channel
+        await supabase
+          .channel(`ticket-${ticketId}`)
+          .send({
+            type: 'broadcast',
+            event: 'voice_message',
+            payload: message
+          });
+
+        // Add to local messages
+        setMessages(prev => [...prev, message]);
+        
+        if (role === 'client') {
+          toast.success('Voice message sent to admin');
+        }
+      } catch (error) {
+        console.error('Error sending message:', error);
+        toast.error('Failed to send message');
       }
     };
 
@@ -228,7 +211,6 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
         <button
           onClick={isRecording ? stopRecording : startRecording}
           className="voice-btn w-full mb-4"
-          disabled={!isConnected}
         >
           {isRecording ? (
             <>
