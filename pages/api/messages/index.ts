@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import initSqlJs from 'sql.js/dist/sql-wasm';
+import initSqlJs from 'sql.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -7,9 +7,10 @@ let db: any = null;
 
 async function initDB() {
   if (!db) {
-    const wasmPath = path.join(process.cwd(), 'public', 'sql-wasm.wasm');
     const SQL = await initSqlJs({
-      wasmBinary: fs.readFileSync(wasmPath)
+      locateFile: (filename: string) => {
+        return path.join(process.cwd(), 'public', filename);
+      }
     });
     const dbPath = path.join(process.cwd(), 'public', 'voice_messages.db');
     
