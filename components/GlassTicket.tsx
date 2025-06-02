@@ -39,8 +39,9 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     if (audioStream) {
       audioStream.getTracks().forEach(track => track.stop());
     }
-    if (timerRef.current) {
+    if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
+      timerRef.current = null;
     }
     if (socket) {
       socket.off('voiceMessage');
@@ -100,6 +101,10 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
 
   const startTimer = () => {
     setRecordingTime(0);
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     timerRef.current = window.setInterval(() => {
       setRecordingTime(prev => {
         if (prev >= 60) {
@@ -115,7 +120,10 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     if (mediaRecorder?.state === 'recording') {
       mediaRecorder.stop();
       audioStream?.getTracks().forEach(track => track.stop());
-      if (timerRef.current) window.clearInterval(timerRef.current);
+      if (timerRef.current !== null) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
       setIsRecording(false);
       setRecordingTime(0);
       toast.info('Recording stopped');
