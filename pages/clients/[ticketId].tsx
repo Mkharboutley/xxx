@@ -18,6 +18,7 @@ import { firebaseApp } from '@/utils/firebase';
 import styles from '@/styles/ticketid.module.css';
 import { scheduleLocalNotification } from '@/utils/exporter';
 import GlassTicket from '@/components/GlassTicket';
+import usePeerConnection from '@/hooks/usePeerConnection';
 
 interface Ticket {
   ticket_number: number;
@@ -41,6 +42,11 @@ export default function ClientTicketView() {
   const [loading, setLoading] = useState(true);
   const [countdown, setCountdown] = useState(0);
   const [time, setTime] = useState(new Date());
+
+  const {
+    isConnected,
+    error: connectionError
+  } = usePeerConnection('client');
 
   useEffect(() => {
     const timer = setInterval(() => {
