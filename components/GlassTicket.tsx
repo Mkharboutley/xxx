@@ -17,51 +17,83 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   const [recordingTime, setRecordingTime] = useState(0);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
   
   const socketRef = useRef<any>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // Initialize socket connection
-    const connectSocket = async () => {
-      // First, make sure the socket server is running
-      await fetch('/api/socket');
-      
-      socketRef.current = io({
-        path: '/api/socket',
-        query: { ticketId, role }
-      });
+    const initializeSocket = async () => {
+      try {
+        // Initialize socket server
+        await fetch('/api/socket');
+        
+        // Create socket connection
+        socketRef.current = io({
+          path: '/api/socket',
+          query: { ticketId, role },
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          timeout: 10000
+        });
 
-      socketRef.current.on('connect', () => {
-        console.log('Connected to socket server');
-      });
+        // Socket event handlers
+        socketRef.current.on('connect', () => {
+          console.log('Socket connected successfully');
+          setIsConnected(true);
+          toast.success('Connected to chat server');
+        });
 
-      socketRef.current.on('voiceMessage', (message: VoiceMessage) => {
-        console.log('Received voice message:', message.id);
-        setMessages(prev => [...prev, message]);
-        if (role === 'admin') {
-          toast.info('New voice message received!');
-        }
-      });
+        socketRef.current.on('voiceMessage', (message: VoiceMessage) => {
+          console.log('Received voice message:', message.id);
+          setMessages(prev => {
+            // Avoid duplicate messages
+            if (prev.some(m => m.id === message.id)) {
+              return prev;
+            }
+            return [...prev, message];
+          });
+          
+          if (role === 'admin' && message.sender === 'client') {
+            toast.info('New voice message from client!');
+          }
+        });
 
-      socketRef.current.on('connect_error', (error: Error) => {
-        console.error('Socket connection error:', error);
-        toast.error('Connection error. Messages may not be delivered.');
-      });
+        socketRef.current.on('connect_error', (error: Error) => {
+          console.error('Socket connection error:', error);
+          setIsConnected(false);
+          toast.error('Connection error. Trying to reconnect...');
+        });
+
+        socketRef.current.on('disconnect', () => {
+          console.log('Socket disconnected');
+          setIsConnected(false);
+          toast.warn('Disconnected from chat server');
+        });
+
+        socketRef.current.on('reconnect', (attemptNumber: number) => {
+          console.log('Reconnected after', attemptNumber, 'attempts');
+          setIsConnected(true);
+          toast.success('Reconnected to chat server');
+        });
+      } catch (error) {
+        console.error('Failed to initialize socket:', error);
+        toast.error('Failed to connect to chat server');
+      }
     };
 
-    connectSocket();
+    initializeSocket();
 
     return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
       cleanup();
     };
   }, [ticketId, role]);
 
   const cleanup = () => {
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+    }
     if (audioStream) {
       audioStream.getTracks().forEach(track => track.stop());
     }
@@ -71,6 +103,11 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   };
 
   const startRecording = async () => {
+    if (!isConnected) {
+      toast.error('Not connected to chat server');
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
@@ -82,7 +119,10 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
       
       setAudioStream(stream);
 
-      const recorder = new MediaRecorder(stream);
+      const recorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
+      });
+      
       setMediaRecorder(recorder);
       chunksRef.current = [];
       
@@ -130,14 +170,20 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   };
 
   const handleRecordingStop = async () => {
-    const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    if (!isConnected) {
+      toast.error('Not connected to chat server. Message will not be sent.');
+      return;
+    }
+
+    const audioBlob = new Blob(chunksRef.current, { 
+      type: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
+    });
     
     if (audioBlob.size === 0) {
       toast.error('Recording is empty');
       return;
     }
 
-    // Convert blob to base64
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64Audio = reader.result as string;
@@ -151,19 +197,20 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
       };
 
       // Send message through socket
-      if (socketRef.current?.connected) {
-        console.log('Sending voice message:', message.id);
-        socketRef.current.emit('sendVoiceMessage', message);
-        
-        // Add to local messages
-        setMessages(prev => [...prev, message]);
-        
-        if (role === 'client') {
-          toast.success('Voice message sent to admin');
-        }
-      } else {
-        toast.error('Not connected to server. Message not sent.');
+      console.log('Sending voice message:', message.id);
+      socketRef.current.emit('sendVoiceMessage', message);
+      
+      // Add to local messages
+      setMessages(prev => [...prev, message]);
+      
+      if (role === 'client') {
+        toast.success('Voice message sent to admin');
       }
+    };
+
+    reader.onerror = () => {
+      console.error('Error reading audio file:', reader.error);
+      toast.error('Failed to process audio file');
     };
 
     reader.readAsDataURL(audioBlob);
@@ -181,6 +228,7 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
         <button
           onClick={isRecording ? stopRecording : startRecording}
           className="voice-btn w-full mb-4"
+          disabled={!isConnected}
         >
           {isRecording ? (
             <>
