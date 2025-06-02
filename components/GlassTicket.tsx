@@ -24,18 +24,34 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
 
   useEffect(() => {
     // Initialize socket connection
-    socketRef.current = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000', {
-      path: '/api/socket',
-      query: { ticketId, role }
-    });
+    const connectSocket = async () => {
+      // First, make sure the socket server is running
+      await fetch('/api/socket');
+      
+      socketRef.current = io({
+        path: '/api/socket',
+        query: { ticketId, role }
+      });
 
-    // Listen for new voice messages
-    socketRef.current.on('voiceMessage', (message: VoiceMessage) => {
-      setMessages(prev => [...prev, message]);
-      if (role === 'admin') {
-        toast.info('New voice message received!');
-      }
-    });
+      socketRef.current.on('connect', () => {
+        console.log('Connected to socket server');
+      });
+
+      socketRef.current.on('voiceMessage', (message: VoiceMessage) => {
+        console.log('Received voice message:', message.id);
+        setMessages(prev => [...prev, message]);
+        if (role === 'admin') {
+          toast.info('New voice message received!');
+        }
+      });
+
+      socketRef.current.on('connect_error', (error: Error) => {
+        console.error('Socket connection error:', error);
+        toast.error('Connection error. Messages may not be delivered.');
+      });
+    };
+
+    connectSocket();
 
     return () => {
       if (socketRef.current) {
@@ -135,13 +151,18 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
       };
 
       // Send message through socket
-      socketRef.current.emit('sendVoiceMessage', message);
-      
-      // Add to local messages
-      setMessages(prev => [...prev, message]);
-      
-      if (role === 'client') {
-        toast.success('Voice message sent to admin');
+      if (socketRef.current?.connected) {
+        console.log('Sending voice message:', message.id);
+        socketRef.current.emit('sendVoiceMessage', message);
+        
+        // Add to local messages
+        setMessages(prev => [...prev, message]);
+        
+        if (role === 'client') {
+          toast.success('Voice message sent to admin');
+        }
+      } else {
+        toast.error('Not connected to server. Message not sent.');
       }
     };
 
