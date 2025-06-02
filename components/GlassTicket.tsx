@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { toast } from 'react-toastify';
-import useVoiceRecorder from '@/hooks/useVoiceRecorder';
 import { v4 as uuidv4 } from 'uuid';
 
 interface VoiceMessage {
@@ -15,20 +14,29 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   const [isRecording, setIsRecording] = useState(false);
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   
-  const {
-    isRecording: recorderIsRecording,
-    recordingDuration,
-    startRecording,
-    stopRecording,
-    audioData
-  } = useVoiceRecorder();
+  const timerRef = useRef<number | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     loadMessages();
     const interval = setInterval(loadMessages, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      cleanup();
+      clearInterval(interval);
+    };
   }, [ticketId]);
+
+  const cleanup = () => {
+    if (audioStream) {
+      audioStream.getTracks().forEach(track => track.stop());
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+  };
 
   const loadMessages = () => {
     try {
@@ -42,51 +50,99 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     }
   };
 
-  const handleStartRecording = async () => {
+  const startRecording = async () => {
     try {
-      await startRecording();
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
+      
+      setAudioStream(stream);
+
+      const recorder = new MediaRecorder(stream);
+      setMediaRecorder(recorder);
+      chunksRef.current = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+      
+      recorder.onstop = handleRecordingStop;
+      recorder.start(100);
+      
       setIsRecording(true);
-      setRecordingTime(0);
+      startTimer();
+      
       toast.info('Recording started');
     } catch (err) {
       console.error('Error starting recording:', err);
-      toast.error('Failed to start recording');
+      toast.error('Failed to access microphone');
     }
   };
 
-  const handleStopRecording = async () => {
-    try {
-      await stopRecording();
-      setIsRecording(false);
-      
-      if (audioData?.url) {
-        const message: VoiceMessage = {
-          id: uuidv4(),
-          ticketId,
-          timestamp: new Date().toISOString(),
-          audioData: audioData.url,
-          sender: role
-        };
-
-        const allRecordings = JSON.parse(localStorage.getItem('voiceRecordings') || '[]');
-        const otherRecordings = allRecordings.filter((r: VoiceMessage) => r.ticketId !== ticketId);
-        const ticketMessages = [...messages, message].slice(-5);
-        
-        localStorage.setItem('voiceRecordings', JSON.stringify([...otherRecordings, ...ticketMessages]));
-        setMessages(ticketMessages);
-
-        if (role === 'client') {
-          localStorage.setItem('adminTicketSync', JSON.stringify({
-            ticketId,
-            timestamp: message.timestamp
-          }));
-          toast.success('Voice message sent');
+  const startTimer = () => {
+    setRecordingTime(0);
+    timerRef.current = window.setInterval(() => {
+      setRecordingTime(prev => {
+        if (prev >= 60) {
+          stopRecording();
+          return 0;
         }
-      }
-    } catch (err) {
-      console.error('Error stopping recording:', err);
-      toast.error('Failed to save recording');
+        return prev + 1;
+      });
+    }, 1000);
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder?.state === 'recording') {
+      mediaRecorder.stop();
+      audioStream?.getTracks().forEach(track => track.stop());
+      if (timerRef.current) clearInterval(timerRef.current);
+      setIsRecording(false);
+      setRecordingTime(0);
+      toast.info('Recording stopped');
     }
+  };
+
+  const handleRecordingStop = async () => {
+    const blob = new Blob(chunksRef.current, { 
+      type: 'audio/webm' 
+    });
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64Audio = reader.result as string;
+      
+      const message: VoiceMessage = {
+        id: uuidv4(),
+        ticketId,
+        timestamp: new Date().toISOString(),
+        audioData: base64Audio,
+        sender: role
+      };
+
+      const updatedMessages = [...messages, message].slice(-5);
+      setMessages(updatedMessages);
+      
+      const allRecordings = JSON.parse(localStorage.getItem('voiceRecordings') || '[]');
+      const otherRecordings = allRecordings.filter((r: VoiceMessage) => r.ticketId !== ticketId);
+      localStorage.setItem('voiceRecordings', JSON.stringify([...otherRecordings, ...updatedMessages]));
+
+      if (role === 'client') {
+        localStorage.setItem('adminTicketSync', JSON.stringify({
+          ticketId,
+          timestamp: message.timestamp
+        }));
+        toast.success('Voice message sent');
+      }
+    };
+
+    reader.readAsDataURL(blob);
   };
 
   const formatTime = (seconds: number) => {
@@ -99,13 +155,13 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     <div className="glass-ticket">
       {role === 'client' && (
         <button
-          onClick={isRecording ? handleStopRecording : handleStartRecording}
+          onClick={isRecording ? stopRecording : startRecording}
           className="voice-btn w-full mb-4"
         >
           {isRecording ? (
             <>
               <span className="recording-dot"></span>
-              Stop Recording ({formatTime(recordingDuration / 1000)})
+              Stop Recording ({formatTime(recordingTime)})
             </>
           ) : (
             'Record Message'
