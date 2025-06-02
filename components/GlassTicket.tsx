@@ -1,35 +1,19 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import usePeerConnection from '@/hooks/usePeerConnection';
 import useVoiceRecorder from '@/hooks/useVoiceRecorder';
-import { formatTime } from '@/utils/time';
-import { v4 as uuidv4 } from 'uuid';
+import AudioMessage from '@/components/AudioMessage';
+import VoiceRecorder from '@/components/VoiceRecorder';
 import type { VoiceMessage } from '@/types';
 
-interface Ticket {
-  id: string;
-  ticket_number: number;
-  plate_number: string;
-  car_model: string;
-  status: string;
-  assignedWorker?: string | null;
-  etaMinutes?: number;
+interface Props {
+  ticketId: string;
+  role: string;
 }
 
-export default function GlassTicket({ ticketId, role }: { ticketId: string; role: string }) {
-  const [ticket, setTicket] = useState<Ticket | null>(null);
+export default function GlassTicket({ ticketId, role }: Props) {
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
   
-  const {
-    isRecording,
-    recordingDuration,
-    audioData,
-    startRecording,
-    stopRecording,
-    cancelRecording,
-    resetRecording
-  } = useVoiceRecorder();
-
   const {
     isConnected,
     error: connectionError,
@@ -39,106 +23,53 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   } = usePeerConnection(role);
 
   useEffect(() => {
-    loadTicket();
-    initializeRoom();
+    initializeVoiceChat();
   }, [ticketId]);
 
-  const loadTicket = async () => {
-    try {
-      const response = await fetch(`/api/tickets/${ticketId}`);
-      if (!response.ok) throw new Error('Failed to load ticket');
-      const data = await response.json();
-      setTicket(data);
-    } catch (err) {
-      console.error('Error loading ticket:', err);
-      toast.error('Failed to load ticket');
-    }
-  };
-
-  const initializeRoom = () => {
+  const initializeVoiceChat = () => {
     if (role === 'admin') {
       const roomData = createRoom();
-      localStorage.setItem(`room_${ticketId}`, JSON.stringify(roomData));
+      localStorage.setItem(`voiceRoom_${ticketId}`, JSON.stringify(roomData));
     } else {
-      const roomData = JSON.parse(localStorage.getItem(`room_${ticketId}`) || '{}');
+      const roomData = JSON.parse(localStorage.getItem(`voiceRoom_${ticketId}`) || '{}');
       if (roomData.roomId) {
         joinRoom(roomData);
       }
     }
   };
 
-  const handleStartRecording = async () => {
+  const handleSendVoiceMessage = (audioBlob: Blob, duration: number) => {
     if (!isConnected) {
       toast.error('Voice chat not connected');
       return;
     }
-    await startRecording();
-  };
 
-  const handleStopRecording = async () => {
-    const recordingData = await stopRecording();
-    if (recordingData) {
-      const message: VoiceMessage = {
-        id: uuidv4(),
-        audioBlob: recordingData.blob,
-        timestamp: Date.now(),
-        sender: role
-      };
-      
-      const success = sendVoiceMessage(message);
-      if (success) {
-        setMessages(prev => [...prev, message]);
-        resetRecording();
-      }
+    const message: VoiceMessage = {
+      id: crypto.randomUUID(),
+      audioBlob,
+      timestamp: Date.now(),
+      sender: role
+    };
+
+    const success = sendVoiceMessage(message);
+    if (success) {
+      setMessages(prev => [...prev, message]);
     }
   };
 
-  if (!ticket) return null;
-
   return (
     <div className="glass-ticket">
-      <div className="ticket-details">
-        <h3>Ticket #{ticket.ticket_number}</h3>
-        <p>Plate: {ticket.plate_number}</p>
-        <p>Model: {ticket.car_model}</p>
-        <p>Status: {ticket.status}</p>
-        {ticket.etaMinutes && <p>ETA: {ticket.etaMinutes} minutes</p>}
+      {connectionError && (
+        <div className="error-message">{connectionError}</div>
+      )}
+
+      <div className="messages-container">
+        {messages.map((message) => (
+          <AudioMessage key={message.id} message={message} />
+        ))}
       </div>
 
-      <div className="voice-chat">
-        {connectionError && (
-          <div className="error-message">{connectionError}</div>
-        )}
-
-        <button
-          onClick={isRecording ? handleStopRecording : handleStartRecording}
-          className="voice-btn"
-          disabled={!isConnected}
-        >
-          {isRecording ? (
-            <>
-              <span className="recording-dot"></span>
-              Stop Recording ({formatTime(recordingDuration)})
-            </>
-          ) : (
-            'Record Message'
-          )}
-        </button>
-
-        <div className="messages-container">
-          {messages.map((message) => (
-            <div key={message.id} className="message-item">
-              <div className="message-header">
-                <span className="message-sender">{message.sender}</span>
-                <span className="message-time">
-                  {new Date(message.timestamp).toLocaleString()}
-                </span>
-              </div>
-              <audio src={URL.createObjectURL(message.audioBlob)} controls />
-            </div>
-          ))}
-        </div>
-      </div>
+      <VoiceRecorder onSend={handleSendVoiceMessage} />
     </div>
   );
 }
