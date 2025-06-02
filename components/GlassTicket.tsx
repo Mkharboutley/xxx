@@ -1,231 +1,45 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
-import { v4 as uuidv4 } from 'uuid';
-import { getSocket } from '@/pages/_app';
 
-interface VoiceMessage {
+interface Ticket {
   id: string;
-  ticketId: string;
-  timestamp: string;
-  audioData: string;
-  sender: string;
+  ticket_number: number;
+  plate_number: string;
+  car_model: string;
+  status: string;
+  assignedWorker?: string | null;
+  etaMinutes?: number;
 }
 
 export default function GlassTicket({ ticketId, role }: { ticketId: string; role: string }) {
-  const [isRecording, setIsRecording] = useState(false);
-  const [messages, setMessages] = useState<VoiceMessage[]>([]);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
-  
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<number | null>(null);
-  const socket = getSocket();
+  const [ticket, setTicket] = useState<Ticket | null>(null);
 
   useEffect(() => {
-    if (socket) {
-      socket.emit('join', { ticketId, role });
-      
-      socket.on('voiceMessage', (message: VoiceMessage) => {
-        setMessages(prev => [...prev, message]);
-      });
-    }
+    loadTicket();
+  }, [ticketId]);
 
-    loadMessages();
-    return () => cleanup();
-  }, [ticketId, socket]);
-
-  const cleanup = () => {
-    if (audioStream) {
-      audioStream.getTracks().forEach(track => track.stop());
-    }
-    if (timerRef.current !== null) {
-      window.clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    if (socket) {
-      socket.off('voiceMessage');
-      socket.emit('leave', { ticketId });
-    }
-  };
-
-  const loadMessages = async () => {
+  const loadTicket = async () => {
     try {
-      const response = await fetch(`/api/messages/${ticketId}`);
-      if (!response.ok) throw new Error('Failed to load messages');
+      const response = await fetch(`/api/tickets/${ticketId}`);
+      if (!response.ok) throw new Error('Failed to load ticket');
       const data = await response.json();
-      setMessages(data);
+      setTicket(data);
     } catch (err) {
-      console.error('Error loading messages:', err);
-      toast.error('Failed to load messages');
+      console.error('Error loading ticket:', err);
+      toast.error('Failed to load ticket');
     }
   };
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        } 
-      });
-      
-      setAudioStream(stream);
-
-      const recorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
-      });
-      
-      setMediaRecorder(recorder);
-      chunksRef.current = [];
-      
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-      
-      recorder.onstop = handleRecordingStop;
-      recorder.start(100);
-      
-      setIsRecording(true);
-      startTimer();
-      
-      toast.info('Recording started');
-    } catch (err) {
-      console.error('Error starting recording:', err);
-      toast.error('Failed to access microphone. Please check permissions.');
-    }
-  };
-
-  const startTimer = () => {
-    setRecordingTime(0);
-    if (timerRef.current !== null) {
-      window.clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    timerRef.current = window.setInterval(() => {
-      setRecordingTime(prev => {
-        if (prev >= 60) {
-          stopRecording();
-          return 0;
-        }
-        return prev + 1;
-      });
-    }, 1000);
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorder?.state === 'recording') {
-      mediaRecorder.stop();
-      audioStream?.getTracks().forEach(track => track.stop());
-      if (timerRef.current !== null) {
-        window.clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      setIsRecording(false);
-      setRecordingTime(0);
-      toast.info('Recording stopped');
-    }
-  };
-
-  const handleRecordingStop = async () => {
-    const audioBlob = new Blob(chunksRef.current, { 
-      type: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
-    });
-    
-    if (audioBlob.size === 0) {
-      toast.error('Recording is empty');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64Audio = reader.result as string;
-      
-      const message: VoiceMessage = {
-        id: uuidv4(),
-        ticketId,
-        timestamp: new Date().toISOString(),
-        audioData: base64Audio,
-        sender: role
-      };
-
-      try {
-        const response = await fetch('/api/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(message),
-        });
-
-        if (!response.ok) throw new Error('Failed to save message');
-
-        // Emit the message through socket
-        if (socket) {
-          socket.emit('sendVoiceMessage', message);
-        }
-
-        setMessages(prev => [...prev, message]);
-        toast.success('Voice message sent successfully');
-      } catch (error) {
-        console.error('Error saving message:', error);
-        toast.error('Failed to save message');
-      }
-    };
-
-    reader.onerror = () => {
-      console.error('Error reading audio file:', reader.error);
-      toast.error('Failed to process audio file');
-    };
-
-    reader.readAsDataURL(audioBlob);
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  if (!ticket) return null;
 
   return (
     <div className="glass-ticket">
-      {role === 'client' && (
-        <button
-          onClick={isRecording ? stopRecording : startRecording}
-          className="voice-btn w-full mb-4"
-        >
-          {isRecording ? (
-            <>
-              <span className="recording-dot"></span>
-              Stop Recording ({formatTime(recordingTime)})
-            </>
-          ) : (
-            'Record Message'
-          )}
-        </button>
-      )}
-
-      <div className="messages-container">
-        {messages.map((message) => (
-          <div key={message.id} className="message-item">
-            <div className="message-header">
-              <span className="message-sender">
-                {message.sender === 'client' ? 'Client' : 'Admin'}
-              </span>
-              <span className="message-time">
-                {new Date(message.timestamp).toLocaleString()}
-              </span>
-            </div>
-            <audio 
-              src={message.audioData} 
-              controls 
-              className="w-full mt-2" 
-            />
-          </div>
-        ))}
+      <div className="ticket-details">
+        <h3>Ticket #{ticket.ticket_number}</h3>
+        <p>Plate: {ticket.plate_number}</p>
+        <p>Model: {ticket.car_model}</p>
+        <p>Status: {ticket.status}</p>
+        {ticket.etaMinutes && <p>ETA: {ticket.etaMinutes} minutes</p>}
       </div>
     </div>
   );
