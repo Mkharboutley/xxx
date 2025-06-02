@@ -7,8 +7,9 @@ let db: any = null;
 
 async function initDB() {
   if (!db) {
+    const wasmPath = path.join(process.cwd(), 'public', 'sql-wasm.wasm');
     const SQL = await initSqlJs({
-      locateFile: (file) => `/sql-wasm.wasm`
+      wasmBinary: fs.readFileSync(wasmPath)
     });
     const dbPath = path.join(process.cwd(), 'public', 'voice_messages.db');
     
