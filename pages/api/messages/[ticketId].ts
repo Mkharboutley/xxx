@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import initSqlJs from 'sql.js';
+import initSqlJs from 'sql.js/dist/sql-wasm';
 import fs from 'fs';
 import path from 'path';
 
@@ -7,7 +7,9 @@ let db: any = null;
 
 async function initDB() {
   if (!db) {
-    const SQL = await initSqlJs();
+    const SQL = await initSqlJs({
+      locateFile: (file) => `/sql-wasm.wasm`
+    });
     const dbPath = path.join(process.cwd(), 'public', 'voice_messages.db');
     
     let buffer;
