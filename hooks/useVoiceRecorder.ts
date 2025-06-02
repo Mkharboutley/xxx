@@ -10,24 +10,18 @@ const useVoiceRecorder = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const startTimeRef = useRef<number>(0);
   const durationIntervalRef = useRef<number | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
   
   const startRecording = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
+      
       streamRef.current = stream;
-      
-      // Set up audio context and analyser for visualization
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      const analyser = audioContext.createAnalyser();
-      analyserRef.current = analyser;
-      analyser.fftSize = 256;
-      
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-      
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -42,7 +36,6 @@ const useVoiceRecorder = () => {
       startTimeRef.current = Date.now();
       setIsRecording(true);
       
-      // Update duration every 100ms
       durationIntervalRef.current = window.setInterval(() => {
         setRecordingDuration(Date.now() - startTimeRef.current);
       }, 100);
@@ -65,7 +58,6 @@ const useVoiceRecorder = () => {
         const data = { blob: audioBlob, url: audioUrl };
         setAudioData(data);
         
-        // Clean up
         if (streamRef.current) {
           streamRef.current.getTracks().forEach(track => track.stop());
         }
@@ -100,15 +92,6 @@ const useVoiceRecorder = () => {
     }
   }, [isRecording]);
   
-  const getVisualizationData = useCallback(() => {
-    if (!analyserRef.current) return new Uint8Array(0);
-    
-    const bufferLength = analyserRef.current.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    analyserRef.current.getByteFrequencyData(dataArray);
-    return dataArray;
-  }, []);
-  
   const resetRecording = useCallback(() => {
     setAudioData(null);
     setRecordingDuration(0);
@@ -121,7 +104,6 @@ const useVoiceRecorder = () => {
     startRecording,
     stopRecording,
     cancelRecording,
-    getVisualizationData,
     resetRecording,
   };
 };
