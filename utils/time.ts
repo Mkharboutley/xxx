@@ -1,5 +1,3 @@
-import { formatDuration } from './formatters';
-
 export const formatTime = (ms: number): string => {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
