@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { v4 as uuidv4 } from 'uuid';
+import { Mic, Square } from 'lucide-react';
 
 interface VoiceMessage {
   id: string;
@@ -61,7 +62,6 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
       });
       
       setAudioStream(stream);
-
       const recorder = new MediaRecorder(stream);
       setMediaRecorder(recorder);
       chunksRef.current = [];
@@ -73,7 +73,7 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
       };
       
       recorder.onstop = handleRecordingStop;
-      recorder.start(100);
+      recorder.start();
       
       setIsRecording(true);
       startTimer();
@@ -160,11 +160,14 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
         >
           {isRecording ? (
             <>
-              <span className="recording-dot"></span>
+              <Square size={16} className="mr-2" />
               Stop Recording ({formatTime(recordingTime)})
             </>
           ) : (
-            'Record Message'
+            <>
+              <Mic size={16} className="mr-2" />
+              Record Message
+            </>
           )}
         </button>
       )}
