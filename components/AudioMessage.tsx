@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import useAudioPlayer from '@/hooks/useAudioPlayer';
+import { formatTime } from '@/utils/time';
 import type { VoiceMessage } from '@/types';
 
 interface Props {
@@ -46,13 +47,6 @@ export default function AudioMessage({ message }: Props) {
       ctx.fillRect(x, y, barWidth - 1, barHeight);
     });
   }, [audioData]);
-
-  const formatTime = (ms: number) => {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
 
   return (
     <div className="audio-message">

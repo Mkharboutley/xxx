@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'react-toastify';
 import usePeerConnection from '@/hooks/usePeerConnection';
 import useVoiceRecorder from '@/hooks/useVoiceRecorder';
+import { formatTime } from '@/utils/time';
 import { v4 as uuidv4 } from 'uuid';
 import type { VoiceMessage } from '@/types';
 
@@ -57,7 +58,6 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   const initializeRoom = () => {
     if (role === 'admin') {
       const roomData = createRoom();
-      // Store room data for clients to join
       localStorage.setItem(`room_${ticketId}`, JSON.stringify(roomData));
     } else {
       const roomData = JSON.parse(localStorage.getItem(`room_${ticketId}`) || '{}');
@@ -91,13 +91,6 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
         resetRecording();
       }
     }
-  };
-
-  const formatTime = (ms: number) => {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
   if (!ticket) return null;
