@@ -1,12 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { v4 as uuidv4 } from 'uuid';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 interface VoiceMessage {
   id: string;
@@ -25,49 +19,13 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
   
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
+  const pollIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // Subscribe to realtime changes
-    const channel = supabase
-      .channel(`ticket-${ticketId}`)
-      .on('broadcast', { event: 'voice_message' }, ({ payload }) => {
-        console.log('Received voice message:', payload);
-        setMessages(prev => {
-          if (prev.some(m => m.id === payload.id)) return prev;
-          return [...prev, payload];
-        });
-        
-        if (role === 'admin' && payload.sender === 'client') {
-          toast.info('New voice message from client!');
-        }
-      })
-      .subscribe();
-
-    // Load existing messages
     loadMessages();
-
-    return () => {
-      cleanup();
-      channel.unsubscribe();
-    };
-  }, [ticketId, role]);
-
-  const loadMessages = async () => {
-    try {
-      const { data: messages } = await supabase
-        .from('voice_messages')
-        .select('*')
-        .eq('ticketId', ticketId)
-        .order('timestamp', { ascending: true });
-
-      if (messages) {
-        setMessages(messages);
-      }
-    } catch (error) {
-      console.error('Error loading messages:', error);
-      toast.error('Failed to load messages');
-    }
-  };
+    startPolling();
+    return () => cleanup();
+  }, [ticketId]);
 
   const cleanup = () => {
     if (audioStream) {
@@ -75,6 +33,27 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     }
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
+    }
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+    }
+  };
+
+  const startPolling = () => {
+    // Poll for new messages every 2 seconds
+    pollIntervalRef.current = window.setInterval(() => {
+      loadMessages();
+    }, 2000);
+  };
+
+  const loadMessages = async () => {
+    try {
+      const response = await fetch(`/api/messages/${ticketId}`);
+      if (!response.ok) throw new Error('Failed to load messages');
+      const messages = await response.json();
+      setMessages(messages);
+    } catch (err) {
+      console.error('Error loading messages:', err);
     }
   };
 
@@ -154,7 +133,7 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
     reader.onloadend = async () => {
       const base64Audio = reader.result as string;
       
-      const message: VoiceMessage = {
+      const message = {
         id: uuidv4(),
         ticketId,
         timestamp: new Date().toISOString(),
@@ -163,31 +142,21 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
       };
 
       try {
-        // Save to Supabase
-        const { error } = await supabase
-          .from('voice_messages')
-          .insert(message);
+        const response = await fetch('/api/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(message),
+        });
 
-        if (error) throw error;
+        if (!response.ok) throw new Error('Failed to save message');
 
-        // Broadcast to channel
-        await supabase
-          .channel(`ticket-${ticketId}`)
-          .send({
-            type: 'broadcast',
-            event: 'voice_message',
-            payload: message
-          });
-
-        // Add to local messages
         setMessages(prev => [...prev, message]);
-        
-        if (role === 'client') {
-          toast.success('Voice message sent to admin');
-        }
+        toast.success('Voice message sent successfully');
       } catch (error) {
-        console.error('Error sending message:', error);
-        toast.error('Failed to send message');
+        console.error('Error saving message:', error);
+        toast.error('Failed to save message');
       }
     };
 
