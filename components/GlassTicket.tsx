@@ -7,7 +7,7 @@ interface VoiceMessage {
   id: string;
   ticketId: string;
   timestamp: string;
-  audioBlob: Blob;
+  audioData: string;
   sender: string;
 }
 
@@ -24,7 +24,8 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
 
   useEffect(() => {
     // Initialize socket connection
-    socketRef.current = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001', {
+    socketRef.current = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000', {
+      path: '/api/socket',
       query: { ticketId, role }
     });
 
@@ -120,23 +121,31 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
       return;
     }
 
-    const message: VoiceMessage = {
-      id: uuidv4(),
-      ticketId,
-      timestamp: new Date().toISOString(),
-      audioBlob,
-      sender: role
+    // Convert blob to base64
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64Audio = reader.result as string;
+      
+      const message: VoiceMessage = {
+        id: uuidv4(),
+        ticketId,
+        timestamp: new Date().toISOString(),
+        audioData: base64Audio,
+        sender: role
+      };
+
+      // Send message through socket
+      socketRef.current.emit('sendVoiceMessage', message);
+      
+      // Add to local messages
+      setMessages(prev => [...prev, message]);
+      
+      if (role === 'client') {
+        toast.success('Voice message sent to admin');
+      }
     };
 
-    // Send message through socket
-    socketRef.current.emit('sendVoiceMessage', message);
-    
-    // Add to local messages
-    setMessages(prev => [...prev, message]);
-    
-    if (role === 'client') {
-      toast.success('Voice message sent to admin');
-    }
+    reader.readAsDataURL(audioBlob);
   };
 
   const formatTime = (seconds: number) => {
@@ -175,7 +184,7 @@ export default function GlassTicket({ ticketId, role }: { ticketId: string; role
               </span>
             </div>
             <audio 
-              src={URL.createObjectURL(message.audioBlob)} 
+              src={message.audioData} 
               controls 
               className="w-full mt-2" 
             />

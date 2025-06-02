@@ -4,6 +4,7 @@ const ioHandler = (req: any, res: any) => {
   if (!res.socket.server.io) {
     const io = new Server(res.socket.server, {
       path: '/api/socket',
+      addTrailingSlash: false,
       cors: {
         origin: '*',
         methods: ['GET', 'POST']
@@ -14,6 +15,7 @@ const ioHandler = (req: any, res: any) => {
       const { ticketId, role } = socket.handshake.query;
       
       socket.join(`ticket-${ticketId}`);
+      console.log(`${role} joined ticket-${ticketId}`);
 
       socket.on('sendVoiceMessage', (message) => {
         io.to(`ticket-${ticketId}`).emit('voiceMessage', message);
@@ -21,6 +23,7 @@ const ioHandler = (req: any, res: any) => {
 
       socket.on('disconnect', () => {
         socket.leave(`ticket-${ticketId}`);
+        console.log(`${role} left ticket-${ticketId}`);
       });
     });
 
